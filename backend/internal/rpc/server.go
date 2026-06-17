@@ -39,6 +39,13 @@ type rpcError struct {
 	Message string `json:"message"`
 }
 
+type authParams struct {
+	Username    string `json:"username"`
+	DisplayName string `json:"displayName"`
+	Password    string `json:"password"`
+	Token       string `json:"token"`
+}
+
 type createPostParams struct {
 	AdminToken string `json:"adminToken"`
 	Title      string `json:"title"`
@@ -53,17 +60,27 @@ type getPostParams struct {
 }
 
 type addCommentParams struct {
+	Token    string `json:"token"`
+	PostID   int64  `json:"postId"`
+	ParentID *int64 `json:"parentId"`
+	Content  string `json:"content"`
+}
+
+type postActionParams struct {
+	Token      string `json:"token"`
+	AdminToken string `json:"adminToken"`
 	PostID     int64  `json:"postId"`
-	AuthorName string `json:"authorName"`
+	Featured   bool   `json:"featured"`
+}
+
+type messageParams struct {
+	Token      string `json:"token"`
+	ReceiverID int64  `json:"receiverId"`
 	Content    string `json:"content"`
 }
 
-type likePostParams struct {
-	PostID int64 `json:"postId"`
-}
-
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	w.Header().Set("Access-Control-Allow-Origin", "*")
 	w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
 	w.Header().Set("Access-Control-Allow-Methods", "POST, OPTIONS")
@@ -93,6 +110,30 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handle(ctx context.Context, req request) (any, int, string) {
 	switch req.Method {
+	case "auth.register":
+		var params authParams
+		if err := decodeParams(req.Params, &params); err != nil {
+			return nil, -32602, err.Error()
+		}
+		session, err := s.store.Register(ctx, params.Username, params.DisplayName, params.Password)
+		return resultOrError(session, err)
+	case "auth.login":
+		var params authParams
+		if err := decodeParams(req.Params, &params); err != nil {
+			return nil, -32602, err.Error()
+		}
+		session, err := s.store.Login(ctx, params.Username, params.Password)
+		return resultOrError(session, err)
+	case "auth.me":
+		var params authParams
+		if err := decodeParams(req.Params, &params); err != nil {
+			return nil, -32602, err.Error()
+		}
+		user, err := s.store.CurrentUser(ctx, params.Token)
+		return resultOrError(user, err)
+	case "users.list":
+		users, err := s.store.ListUsers(ctx)
+		return resultOrError(users, err)
 	case "posts.list":
 		posts, err := s.store.ListPosts(ctx, s.hasAdminToken(req.Params))
 		return resultOrError(posts, err)
@@ -116,20 +157,71 @@ func (s *Server) handle(ctx context.Context, req request) (any, int, string) {
 		}
 		post, err := s.store.CreatePost(ctx, params.Title, params.Summary, params.Content, params.Published)
 		return resultOrError(post, err)
+	case "posts.like":
+		var params postActionParams
+		if err := decodeParams(req.Params, &params); err != nil {
+			return nil, -32602, err.Error()
+		}
+		user, err := s.store.CurrentUser(ctx, params.Token)
+		if err != nil {
+			return resultOrError(nil, err)
+		}
+		post, err := s.store.LikePost(ctx, user.ID, params.PostID)
+		return resultOrError(post, err)
+	case "posts.favorite":
+		var params postActionParams
+		if err := decodeParams(req.Params, &params); err != nil {
+			return nil, -32602, err.Error()
+		}
+		user, err := s.store.CurrentUser(ctx, params.Token)
+		if err != nil {
+			return resultOrError(nil, err)
+		}
+		post, err := s.store.FavoritePost(ctx, user.ID, params.PostID)
+		return resultOrError(post, err)
+	case "posts.feature":
+		var params postActionParams
+		if err := decodeParams(req.Params, &params); err != nil {
+			return nil, -32602, err.Error()
+		}
+		if !s.validAdminToken(params.AdminToken) {
+			return nil, -32001, "invalid admin token"
+		}
+		post, err := s.store.SetFeatured(ctx, params.PostID, params.Featured)
+		return resultOrError(post, err)
 	case "comments.add":
 		var params addCommentParams
 		if err := decodeParams(req.Params, &params); err != nil {
 			return nil, -32602, err.Error()
 		}
-		comment, err := s.store.AddComment(ctx, params.PostID, params.AuthorName, params.Content)
+		user, err := s.store.CurrentUser(ctx, params.Token)
+		if err != nil {
+			return resultOrError(nil, err)
+		}
+		comment, err := s.store.AddComment(ctx, user, params.PostID, params.ParentID, params.Content)
 		return resultOrError(comment, err)
-	case "posts.like":
-		var params likePostParams
+	case "messages.send":
+		var params messageParams
 		if err := decodeParams(req.Params, &params); err != nil {
 			return nil, -32602, err.Error()
 		}
-		post, err := s.store.LikePost(ctx, params.PostID)
-		return resultOrError(post, err)
+		user, err := s.store.CurrentUser(ctx, params.Token)
+		if err != nil {
+			return resultOrError(nil, err)
+		}
+		message, err := s.store.SendMessage(ctx, user, params.ReceiverID, params.Content)
+		return resultOrError(message, err)
+	case "messages.list":
+		var params messageParams
+		if err := decodeParams(req.Params, &params); err != nil {
+			return nil, -32602, err.Error()
+		}
+		user, err := s.store.CurrentUser(ctx, params.Token)
+		if err != nil {
+			return resultOrError(nil, err)
+		}
+		messages, err := s.store.ListMessages(ctx, user.ID)
+		return resultOrError(messages, err)
 	default:
 		return nil, -32601, "method not found"
 	}
@@ -148,6 +240,12 @@ func resultOrError(result any, err error) (any, int, string) {
 	}
 	if errors.Is(err, store.ErrNotFound) {
 		return nil, -32004, "resource not found"
+	}
+	if errors.Is(err, store.ErrUnauthorized) {
+		return nil, -32001, "please login first"
+	}
+	if errors.Is(err, store.ErrConflict) {
+		return nil, -32009, "resource already exists"
 	}
 	return nil, -32000, err.Error()
 }

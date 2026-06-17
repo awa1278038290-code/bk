@@ -1,4 +1,4 @@
-const RPC_URL = import.meta.env.VITE_RPC_URL || '/rpc';
+const RPC_URL = import.meta.env.VITE_RPC_URL || 'http://127.0.0.1:8080/rpc';
 
 let rpcId = 1;
 
@@ -24,4 +24,3 @@ export async function rpc(method, params = {}) {
   }
   return payload.result;
 }
-

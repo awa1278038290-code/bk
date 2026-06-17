@@ -4,6 +4,16 @@ node_modules/
 # Frontend build
 frontend/dist/
 frontend/.vite/
+frontend/.vite-cache/
+pgsql/
+postgresql-binaries.zip
+pgdata/
+pg-start.*.log
+postgres-runtime.log
+pgpass.tmp
+pg-bg.*.log
+pg-ctl.log
+backend-run.*.log
 
 # Go build artifacts
 backend/backend
