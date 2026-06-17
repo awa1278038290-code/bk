@@ -59,9 +59,13 @@ button {
 
 .brand {
   align-items: center;
+  background: transparent;
+  border: 0;
   color: #0f766e;
   display: flex;
   gap: 10px;
+  padding: 0;
+  text-align: left;
 }
 
 .brand-mark {
@@ -97,16 +101,19 @@ button {
   gap: 14px;
 }
 
-.top-nav a,
-.auth-links a {
+.top-nav button,
+.auth-links button {
+  background: transparent;
+  border: 0;
   border-radius: 999px;
   color: #42526e;
   padding: 7px 9px;
   text-decoration: none;
 }
 
-.top-nav a:hover,
-.auth-links a {
+.top-nav button:hover,
+.top-nav button.active,
+.auth-links button:first-child {
   background: #ecfdf5;
   color: #047857;
 }
@@ -183,6 +190,12 @@ button {
 .left-nav button:hover {
   background: #eff6ff;
   color: #0b72c9;
+}
+
+.left-nav button.active {
+  background: linear-gradient(135deg, #e0f2fe, #ecfdf5);
+  color: #047857;
+  font-weight: 800;
 }
 
 .left-nav svg {

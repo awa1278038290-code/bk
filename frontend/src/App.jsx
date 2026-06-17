@@ -16,13 +16,38 @@ import {
 } from 'lucide-react';
 import { rpc } from './api';
 
-const navItems = ['分类', '精华', '候选', '订阅', '关注', '我评', '我赞', '足迹', '更多'];
+const navItems = [
+  { key: 'all', label: '分类', icon: BookOpen },
+  { key: 'featured', label: '精华', icon: Star },
+  { key: 'candidate', label: '候选', icon: ThumbsUp },
+  { key: 'subscribed', label: '订阅', icon: BookOpen },
+  { key: 'following', label: '关注', icon: Star },
+  { key: 'commented', label: '我评', icon: MessageCircle },
+  { key: 'liked', label: '我赞', icon: ThumbsUp },
+  { key: 'history', label: '足迹', icon: Star },
+  { key: 'more', label: '更多', icon: ThumbsUp }
+];
+
+const topNavItems = ['会员', '周边', '新闻', '博问', '闪存', '班级', '赞助商'];
+
 const editorLinks = [
   '让 Agent 在对话中成长：自进化机制的五层实现',
   '我的第一个 skill：从脚手架到上线',
   '李飞飞空间智能开源动作今天来了',
   'SpaceX 华人女工程师：没有硕博学位，也能做出好产品'
 ];
+
+const navLabels = {
+  all: '开发者技术精选',
+  featured: '精华文章',
+  candidate: '候选推荐',
+  subscribed: '我的订阅',
+  following: '我的关注',
+  commented: '我评论过',
+  liked: '我点赞过',
+  history: '阅读足迹',
+  more: '更多内容'
+};
 
 export default function App() {
   const [posts, setPosts] = useState([]);
@@ -37,12 +62,60 @@ export default function App() {
   const [messages, setMessages] = useState([]);
   const [replyTo, setReplyTo] = useState(null);
   const [authMode, setAuthMode] = useState('login');
+  const [activeNav, setActiveNav] = useState('all');
+  const [activeTop, setActiveTop] = useState('');
+  const [searchText, setSearchText] = useState('');
+  const [historyIds, setHistoryIds] = useState(() => readNumberList('historyIds'));
+  const [likedIds, setLikedIds] = useState(() => readNumberList('likedIds'));
+  const [favoriteIds, setFavoriteIds] = useState(() => readNumberList('favoriteIds'));
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
 
-  const currentPostId = selectedId || posts[0]?.id;
-  const ranking = useMemo(() => posts.slice(0, 6), [posts]);
+  const filteredPosts = useMemo(() => {
+    const query = searchText.trim().toLowerCase();
+    return posts.filter((post) => {
+      const matchesSearch =
+        !query ||
+        [post.title, post.summary, post.content].some((value) =>
+          String(value || '')
+            .toLowerCase()
+            .includes(query)
+        );
+
+      if (!matchesSearch) return false;
+      if (activeTop && !String(post.title + post.summary + post.content).includes(activeTop)) {
+        return true;
+      }
+
+      switch (activeNav) {
+        case 'featured':
+          return post.featured;
+        case 'candidate':
+          return !post.featured;
+        case 'subscribed':
+        case 'following':
+          return post.featured || favoriteIds.includes(post.id) || post.favoritesCount > 0;
+        case 'commented':
+          return post.commentsCount > 0;
+        case 'liked':
+          return likedIds.includes(post.id) || post.likesCount > 0;
+        case 'history':
+          return historyIds.includes(post.id);
+        default:
+          return true;
+      }
+    });
+  }, [activeNav, activeTop, favoriteIds, historyIds, likedIds, posts, searchText]);
+
+  const currentPostId = selectedId || filteredPosts[0]?.id || posts[0]?.id;
+  const ranking = useMemo(
+    () =>
+      [...posts]
+        .sort((a, b) => b.likesCount + b.commentsCount - (a.likesCount + a.commentsCount))
+        .slice(0, 6),
+    [posts]
+  );
 
   const loadPosts = useCallback(async () => {
     setLoading(true);
@@ -70,6 +143,7 @@ export default function App() {
       try {
         const result = await rpc('posts.get', adminToken ? { id, adminToken } : { id });
         setSelected(result);
+        rememberNumber('historyIds', id, setHistoryIds);
       } catch (err) {
         setError(err.message);
         setSelected(null);
@@ -109,6 +183,12 @@ export default function App() {
     loadMessages();
   }, [loadMessages]);
 
+  useEffect(() => {
+    if (filteredPosts.length > 0 && !filteredPosts.some((post) => post.id === currentPostId)) {
+      setSelectedId(filteredPosts[0].id);
+    }
+  }, [currentPostId, filteredPosts]);
+
   function saveSession(nextSession) {
     setSession(nextSession);
     localStorage.setItem('session', JSON.stringify(nextSession));
@@ -118,11 +198,27 @@ export default function App() {
     setSession(null);
     setMessages([]);
     localStorage.removeItem('session');
+    setNotice('已退出登录');
   }
 
   function rememberToken(value) {
     setAdminToken(value);
     localStorage.setItem('adminToken', value);
+  }
+
+  function selectPost(id) {
+    setSelectedId(id);
+    rememberNumber('historyIds', id, setHistoryIds);
+  }
+
+  function chooseNav(key) {
+    setActiveNav(key);
+    setNotice(`${navLabels[key]}已切换`);
+  }
+
+  function chooseTop(item) {
+    setActiveTop(item);
+    setNotice(`已切换到「${item}」频道`);
   }
 
   async function handleAuth(event) {
@@ -185,6 +281,7 @@ export default function App() {
       });
       formElement.reset();
       setReplyTo(null);
+      setNotice('评论已提交');
       await refresh();
     } catch (err) {
       setError(err.message);
@@ -194,7 +291,10 @@ export default function App() {
   async function handleLike() {
     if (!selected?.post) return;
     try {
-      await rpc('posts.like', { token: session?.token, postId: selected.post.id });
+      const post = await rpc('posts.like', { token: session?.token, postId: selected.post.id });
+      rememberNumber('likedIds', selected.post.id, setLikedIds);
+      setSelected((current) => (current ? { ...current, post } : current));
+      setNotice('已点赞');
       await refresh();
     } catch (err) {
       setError(err.message);
@@ -204,7 +304,10 @@ export default function App() {
   async function handleFavorite() {
     if (!selected?.post) return;
     try {
-      await rpc('posts.favorite', { token: session?.token, postId: selected.post.id });
+      const post = await rpc('posts.favorite', { token: session?.token, postId: selected.post.id });
+      rememberNumber('favoriteIds', selected.post.id, setFavoriteIds);
+      setSelected((current) => (current ? { ...current, post } : current));
+      setNotice('已收藏');
       await refresh();
     } catch (err) {
       setError(err.message);
@@ -214,11 +317,13 @@ export default function App() {
   async function handleFeature() {
     if (!selected?.post) return;
     try {
-      await rpc('posts.feature', {
+      const post = await rpc('posts.feature', {
         adminToken,
         postId: selected.post.id,
         featured: !selected.post.featured
       });
+      setSelected((current) => (current ? { ...current, post } : current));
+      setNotice(post.featured ? '已设为精华' : '已取消精华');
       await refresh();
     } catch (err) {
       setError(err.message);
@@ -246,48 +351,70 @@ export default function App() {
   return (
     <main className="portal-shell">
       <header className="site-header">
-        <div className="brand">
+        <button className="brand" onClick={() => chooseNav('all')}>
           <div className="brand-mark">博</div>
           <div>
             <strong>技术博客园</strong>
             <span>tech.cnblogs.local</span>
           </div>
-        </div>
-        <nav className="top-nav">
-          <a>会员</a>
-          <a>周边</a>
-          <a>新闻</a>
-          <a>博问</a>
-          <a>闪存</a>
-          <a>班级</a>
-          <a>赞助商</a>
+        </button>
+        <nav className="top-nav" aria-label="顶部频道">
+          {topNavItems.map((item) => (
+            <button
+              className={activeTop === item ? 'active' : ''}
+              key={item}
+              onClick={() => chooseTop(item)}
+              type="button"
+            >
+              {item}
+            </button>
+          ))}
         </nav>
         <label className="search-box">
           <Search size={16} />
-          <input placeholder="代码改变世界" />
+          <input
+            onChange={(event) => setSearchText(event.target.value)}
+            placeholder="代码改变世界"
+            value={searchText}
+          />
         </label>
         <div className="auth-links">
-          <a>{session?.user?.displayName || '游客'}</a>
+          <button type="button" onClick={() => chooseTop('会员')}>
+            {session?.user?.displayName || '游客'}
+          </button>
           {session && <button onClick={logout}>退出</button>}
         </div>
       </header>
 
       <div className="layout-grid">
         <aside className="left-nav">
-          {navItems.map((item, index) => (
-            <button key={item}>
-              {index % 3 === 0 && <BookOpen size={16} />}
-              {index % 3 === 1 && <Star size={16} />}
-              {index % 3 === 2 && <ThumbsUp size={16} />}
-              {item}
-            </button>
-          ))}
+          {navItems.map((item) => {
+            const Icon = item.icon;
+            return (
+              <button
+                className={activeNav === item.key ? 'active' : ''}
+                key={item.key}
+                onClick={() => chooseNav(item.key)}
+                type="button"
+              >
+                <Icon size={16} />
+                {item.label}
+              </button>
+            );
+          })}
         </aside>
 
         <section className="feed-panel">
           <div className="editor-picks">
             {editorLinks.map((item) => (
-              <button key={item}>
+              <button
+                key={item}
+                onClick={() => {
+                  setSearchText(item.slice(0, 8));
+                  setNotice(`已定位精选：${item}`);
+                }}
+                type="button"
+              >
                 <ChevronRight size={14} />
                 {item}
               </button>
@@ -295,8 +422,8 @@ export default function App() {
           </div>
 
           <div className="feed-toolbar">
-            <h1>开发者技术精选</h1>
-            <button className="icon-button" onClick={refresh} title="刷新">
+            <h1>{activeTop ? `${activeTop} · ${navLabels[activeNav]}` : navLabels[activeNav]}</h1>
+            <button className="icon-button" onClick={refresh} title="刷新" type="button">
               <RefreshCcw size={17} />
             </button>
           </div>
@@ -304,14 +431,16 @@ export default function App() {
           {error && <div className="alert">{error}</div>}
           {notice && <div className="success">{notice}</div>}
           {loading && <p className="muted">正在加载文章...</p>}
-          {!loading && posts.length === 0 && <p className="muted">还没有文章，去后台发布第一篇吧。</p>}
+          {!loading && filteredPosts.length === 0 && (
+            <p className="muted">当前筛选下没有文章，可以换个频道或去后台发布第一篇。</p>
+          )}
 
           <div className="post-feed">
-            {posts.map((post) => (
+            {filteredPosts.map((post) => (
               <article
                 key={post.id}
                 className={`feed-item ${post.id === currentPostId ? 'active' : ''}`}
-                onClick={() => setSelectedId(post.id)}
+                onClick={() => selectPost(post.id)}
               >
                 <h2>
                   {post.featured && <span className="featured-badge">精华</span>}
@@ -351,13 +480,13 @@ export default function App() {
                     </p>
                   </div>
                   <div className="detail-actions">
-                    <button className="like-button" onClick={handleLike}>
+                    <button className="like-button" onClick={handleLike} type="button">
                       <Heart size={17} /> 点赞 {selected.post.likesCount}
                     </button>
-                    <button className="like-button secondary" onClick={handleFavorite}>
+                    <button className="like-button secondary" onClick={handleFavorite} type="button">
                       <Star size={17} /> 收藏 {selected.post.favoritesCount}
                     </button>
-                    <button className="like-button secondary" onClick={handleFeature}>
+                    <button className="like-button secondary" onClick={handleFeature} type="button">
                       <ShieldCheck size={17} /> {selected.post.featured ? '取消精华' : '设为精华'}
                     </button>
                   </div>
@@ -370,11 +499,18 @@ export default function App() {
                   {replyTo && (
                     <div className="replying">
                       正在回复 {replyTo.authorName}
-                      <button onClick={() => setReplyTo(null)}>取消</button>
+                      <button onClick={() => setReplyTo(null)} type="button">
+                        取消
+                      </button>
                     </div>
                   )}
                   <form className="comment-form" onSubmit={handleAddComment}>
-                    <textarea name="content" placeholder={session ? '写下评论或回复' : '登录后才能评论'} rows="3" required />
+                    <textarea
+                      name="content"
+                      placeholder={session ? '写下评论或回复' : '登录后才能评论'}
+                      required
+                      rows="3"
+                    />
                     <button type="submit">
                       <Send size={15} /> 提交
                     </button>
@@ -385,7 +521,9 @@ export default function App() {
                         <strong>{comment.authorName}</strong>
                         <span>{formatDate(comment.createdAt)}</span>
                         <p>{comment.content}</p>
-                        <button onClick={() => setReplyTo(comment)}>回复</button>
+                        <button onClick={() => setReplyTo(comment)} type="button">
+                          回复
+                        </button>
                       </div>
                     ))}
                   </div>
@@ -401,7 +539,7 @@ export default function App() {
           <section className="ranking">
             <h2>48小时阅读排行</h2>
             {ranking.map((post, index) => (
-              <button key={post.id} onClick={() => setSelectedId(post.id)}>
+              <button key={post.id} onClick={() => selectPost(post.id)} type="button">
                 <span>{index + 1}</span>
                 {post.title}
               </button>
@@ -421,16 +559,24 @@ export default function App() {
             ) : (
               <form className="admin-form" onSubmit={handleAuth}>
                 <div className="mode-switch">
-                  <button type="button" className={authMode === 'login' ? 'active' : ''} onClick={() => setAuthMode('login')}>
+                  <button
+                    className={authMode === 'login' ? 'active' : ''}
+                    onClick={() => setAuthMode('login')}
+                    type="button"
+                  >
                     登录
                   </button>
-                  <button type="button" className={authMode === 'register' ? 'active' : ''} onClick={() => setAuthMode('register')}>
+                  <button
+                    className={authMode === 'register' ? 'active' : ''}
+                    onClick={() => setAuthMode('register')}
+                    type="button"
+                  >
                     注册
                   </button>
                 </div>
                 <input name="username" placeholder="账号" required />
                 {authMode === 'register' && <input name="displayName" placeholder="昵称" required />}
-                <input name="password" placeholder="密码" type="password" required />
+                <input name="password" placeholder="密码" required type="password" />
                 <button type="submit">{authMode === 'login' ? '登录' : '注册'}</button>
               </form>
             )}
@@ -452,7 +598,12 @@ export default function App() {
                     </option>
                   ))}
               </select>
-              <textarea name="content" placeholder={session ? '发送私聊内容' : '登录后才能私聊'} rows="3" required />
+              <textarea
+                name="content"
+                placeholder={session ? '发送私聊内容' : '登录后才能私聊'}
+                required
+                rows="3"
+              />
               <button type="submit">
                 <Send size={15} /> 发送
               </button>
@@ -477,18 +628,18 @@ export default function App() {
             <label>
               管理 Token
               <input
-                value={adminToken}
                 onChange={(event) => rememberToken(event.target.value)}
                 placeholder="默认 change-me"
                 type="password"
+                value={adminToken}
               />
             </label>
             <form className="admin-form" onSubmit={handleCreatePost}>
               <input name="title" placeholder="文章标题" required />
               <input name="summary" placeholder="一句话摘要" />
-              <textarea name="content" placeholder="正文内容" rows="7" required />
+              <textarea name="content" placeholder="正文内容" required rows="7" />
               <label className="checkbox-line">
-                <input name="published" type="checkbox" defaultChecked />
+                <input defaultChecked name="published" type="checkbox" />
                 立即发布
               </label>
               <button type="submit">
@@ -500,6 +651,22 @@ export default function App() {
       </div>
     </main>
   );
+}
+
+function readNumberList(key) {
+  try {
+    return JSON.parse(localStorage.getItem(key) || '[]');
+  } catch {
+    return [];
+  }
+}
+
+function rememberNumber(key, value, setter) {
+  setter((current) => {
+    const next = [Number(value), ...current.filter((item) => item !== Number(value))].slice(0, 30);
+    localStorage.setItem(key, JSON.stringify(next));
+    return next;
+  });
 }
 
 function formatDate(value) {
