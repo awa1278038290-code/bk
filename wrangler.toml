@@ -9,7 +9,7 @@ command = "npm --prefix frontend ci && npm --prefix frontend run build"
 directory = "./frontend/dist"
 not_found_handling = "single-page-application"
 binding = "ASSETS"
-run_worker_first = ["/rpc"]
+run_worker_first = ["/rpc", "/assets/*"]
 
 [vars]
 # Replace this with your public HTTPS Go backend origin, for example:

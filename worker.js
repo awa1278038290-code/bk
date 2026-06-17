@@ -63,6 +63,14 @@ export default {
   async fetch(request, env) {
     const url = new URL(request.url);
 
+    if (url.pathname === '/assets/index-Cg5F3XRF.js') {
+      return fetchAsset(env, request, '/assets/index-BStg0OKk.js', 'application/javascript; charset=utf-8');
+    }
+
+    if (url.pathname === '/assets/index-BAoqMVph.css') {
+      return fetchAsset(env, request, '/assets/index-COWMr5Sj.css', 'text/css; charset=utf-8');
+    }
+
     if (url.pathname === '/rpc') {
       if (request.method === 'OPTIONS') {
         return withCors(new Response(null, { status: 204 }));
@@ -79,6 +87,17 @@ export default {
     return env.ASSETS.fetch(request);
   }
 };
+
+async function fetchAsset(env, request, pathname, contentType) {
+  const url = new URL(request.url);
+  url.pathname = pathname;
+  url.search = '';
+  const response = await env.ASSETS.fetch(new Request(url, request));
+  const headers = new Headers(response.headers);
+  headers.set('Content-Type', contentType);
+  headers.set('Cache-Control', 'no-store');
+  return new Response(response.body, { status: response.status, headers });
+}
 
 async function handleFallbackRPC(request) {
   if (request.method !== 'POST') {
