@@ -1,4 +1,5 @@
-const RPC_URL = import.meta.env.VITE_RPC_URL || 'http://127.0.0.1:8080/rpc';
+const RPC_URL =
+  import.meta.env.VITE_RPC_URL || (import.meta.env.DEV ? 'http://127.0.0.1:8080/rpc' : '/rpc');
 
 let rpcId = 1;
 
